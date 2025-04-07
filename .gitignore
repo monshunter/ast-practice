@@ -1,0 +1,58 @@
+# Common files to ignore in Git
+
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+.cursor
+
+# Dependency directories
+node_modules/
+vendor/
+bower_components/
+
+# Build artifacts
+dist/
+build/
+*.exe
+*.dll
+*.so
+*.a
+
+# Logs and databases
+*.log
+*.sqlite
+*.sqlite3
+
+# Environment files
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+
+# Editor files
+*.sublime-workspace
+*.sublime-project
+
+# Temporary files
+*.tmp
+*.temp
+
+# System files
+ehthumbs.db
+[Dd]esktop.ini
+
+# Linux executable files
+*.out
+*.bin
+*.run
+
+# local bin
+bin/*
+cmd/getcomments/getcomments

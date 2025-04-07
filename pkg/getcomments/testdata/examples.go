@@ -1,4 +1,4 @@
-package examples
+package testdata
 
 // 导入标准库
 import "fmt"

@@ -1,4 +1,4 @@
-package examples
+package testdata
 
 // 导入标准库
 import (
@@ -101,4 +101,26 @@ type Person struct {
 // 定义一个接口
 type Animal interface {
 	Say() string // 说话
+}
+
+// 实现接口
+func (p *Person) Say() string {
+	// 打印输出： Hello,
+	return "Hello, " + p.Name
+}
+
+// 定义一个数组
+// 数组注释
+var ARR = []int{1, 2, 3} // 行尾数组注释
+
+var ARR2 = []int{
+	1, // 这是1
+	2, // 这是2
+	3, // 这是3
+} // 行尾数组注释2
+// 定义一个map
+// map注释
+var MAP = map[string]int{
+	"a": 1, // map注释a
+	"b": 2, // map注释b
 }

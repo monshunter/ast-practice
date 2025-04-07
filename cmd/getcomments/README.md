@@ -24,12 +24,37 @@ chmod +x build.sh
 ```
 
 ## 使用方法
+
+### 命令行使用
 ```bash
 # 从文件中提取注释
 ./getcomments /path/to/your/gofile.go
+```
 
-# 在测试环境中运行
-cd examples
+### 作为库使用
+您可以在自己的Go项目中直接导入并使用本工具的核心功能：
+
+```go
+import "github.com/yourusername/getcomments"
+
+func main() {
+    // 从文件提取注释
+    commentsMap, err := ExtractComments("/path/to/your/gofile.go")
+    if err != nil {
+        // 处理错误
+    }
+    
+    // 使用提取到的注释
+    for key, comments := range commentsMap {
+        // 处理注释
+    }
+}
+```
+
+### 运行测试
+```bash
+# 在getcomments目录中运行测试
+cd cmd/getcomments
 go test -v
 ```
 
@@ -92,6 +117,9 @@ func ExampleGetComments() { // 函数名: 函数注释 ExampleGetComments
     "examples.go:22": [
         "// 打印输出： x is less than y",
         "// 行尾注释打印输出： x is less than y"
+    ],
+    "examples.go:4": [
+        "// 导入标准库"
     ]
 }
 ```
@@ -107,11 +135,10 @@ func ExampleGetComments() { // 函数名: 函数注释 ExampleGetComments
 
 该工具特别关注以下类型的节点：
 - 函数声明 (*ast.FuncDecl)
-- 赋值语句 (*ast.AssignStmt)
-- 表达式语句 (*ast.ExprStmt)
-- 条件语句 (*ast.IfStmt)
-- 循环语句 (*ast.ForStmt)
-- 等其他常见的代码结构
+- 一般声明 (*ast.GenDecl) - 包括常量、变量和类型声明
+- 结构体字段 (*ast.Field)
+- 接口方法 (*ast.Field)
+- 以及其他常见的代码结构
 
 ## 注意事项
 1. 工具会尝试智能判断哪些注释与代码相关，但在复杂情况下可能存在误判
