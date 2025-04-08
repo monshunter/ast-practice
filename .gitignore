@@ -56,3 +56,4 @@ ehthumbs.db
 # local bin
 bin/*
 cmd/getcomments/getcomments
+cmd/blockfycodes/blockfycodes
