@@ -10,11 +10,17 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+
+	"golang.org/x/tools/go/ast/astutil"
 )
 
 func main() {
 	filename, content := initConfig()
-	buf, err := runInsertStmt(filename, content)
+	buf, err := runInsertImport(filename, content)
+	if err != nil {
+		log.Fatalf("Failed to insert import: %v", err)
+	}
+	buf, err = runInsertStmt(filename, buf)
 	if err != nil {
 		log.Fatalf("Failed to insert expr: %v", err)
 	}
@@ -53,6 +59,34 @@ func initConfig() (string, []byte) {
 		content = []byte(input)
 	}
 	return filename, content
+}
+
+func runInsertImport(filename string, content []byte) ([]byte, error) {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, filename, content, parser.ParseComments)
+	if err != nil {
+		return nil, err
+	}
+
+	// 检查是否已存在"fmt" import
+	hasFmt := false
+	for _, ipt := range f.Imports {
+		if ipt.Path.Value == `"fmt"` {
+			hasFmt = true
+			break
+		}
+	}
+	if !hasFmt {
+		astutil.AddNamedImport(fset, f, "f", "fmt")
+	}
+
+	var buf bytes.Buffer
+	cfg := printer.Config{Mode: printer.UseSpaces | printer.TabIndent, Tabwidth: 8}
+	err = cfg.Fprint(&buf, fset, f)
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 func runInsertStmt(filename string, content []byte) ([]byte, error) {
