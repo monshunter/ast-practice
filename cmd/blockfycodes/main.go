@@ -9,35 +9,34 @@ import (
 	"go/token"
 	"log"
 	"os"
-	"path/filepath"
+	"slices"
 
 	"golang.org/x/tools/go/ast/astutil"
 )
 
 func main() {
-	filename, content := initConfig()
-	buf, err := runInsertImport(filename, content)
+	content := initConfig()
+	content, err := runInsertImport(content)
 	if err != nil {
 		log.Fatalf("Failed to insert import: %v", err)
 	}
-	buf, err = runInsertStmt(filename, buf)
+	content, err = runInsertStmt(content)
 	if err != nil {
 		log.Fatalf("Failed to insert expr: %v", err)
 	}
 
-	buf, err = runInsertComment(filename, buf)
+	content, err = runInsertComment(content)
 	if err != nil {
 		log.Fatalf("Failed to insert comment: %v", err)
 	}
 	// ---
 	fmt.Println("Modified Code:")
 	fmt.Println("----------------")
-	fmt.Println(string(buf))
+	fmt.Println(string(content))
 }
 
-func initConfig() (string, []byte) {
+func initConfig() []byte {
 	var content []byte
-	var filename string
 	// 检查参数
 	if len(os.Args) != 2 {
 		fmt.Println("用法: blockfycodes <文件路径或代码内容>")
@@ -48,22 +47,34 @@ func initConfig() (string, []byte) {
 	// 判断输入是文件路径还是代码内容
 	if _, err := os.Stat(input); err == nil {
 		// 输入是文件路径
-		filename = filepath.Base(input)
 		content, err = os.ReadFile(input)
 		if err != nil {
 			log.Fatalf("读取文件失败: %v\n", err)
 		}
 	} else {
-		// 输入是代码内容
-		filename = "testdata/example.go"
 		content = []byte(input)
 	}
-	return filename, content
+	return content
 }
 
-func runInsertImport(filename string, content []byte) ([]byte, error) {
+func getAstTree(content []byte) (*token.FileSet, *ast.File, error) {
 	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, filename, content, parser.ParseComments)
+	f, err := parser.ParseFile(fset, "", content, parser.ParseComments)
+	return fset, f, err
+}
+
+func formatFile(fset *token.FileSet, f *ast.File) ([]byte, error) {
+	var buf bytes.Buffer
+	cfg := printer.Config{Mode: printer.UseSpaces, Tabwidth: 4}
+	err := cfg.Fprint(&buf, fset, f)
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func runInsertImport(content []byte) ([]byte, error) {
+	fset, f, err := getAstTree(content)
 	if err != nil {
 		return nil, err
 	}
@@ -79,254 +90,231 @@ func runInsertImport(filename string, content []byte) ([]byte, error) {
 	if !hasFmt {
 		astutil.AddNamedImport(fset, f, "f", "fmt")
 	}
+	return formatFile(fset, f)
+}
 
-	var buf bytes.Buffer
-	cfg := printer.Config{Mode: printer.UseSpaces | printer.TabIndent, Tabwidth: 8}
-	err = cfg.Fprint(&buf, fset, f)
+func runInsertStmt(content []byte) ([]byte, error) {
+	fset, f, err := getAstTree(content)
 	if err != nil {
 		return nil, err
 	}
-	return buf.Bytes(), nil
-}
 
-func runInsertStmt(filename string, content []byte) ([]byte, error) {
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, filename, content, parser.ParseComments)
-	if err != nil {
-		log.Fatal(err)
-	}
+	positionsToInsert := []int{}
 	for _, decl := range f.Decls {
 		if decl, ok := decl.(*ast.FuncDecl); ok {
-			decl.Body.List = extraStmt(decl.Body.List, fset)
+			extraStmt(decl.Body.List, fset, &positionsToInsert)
 		}
 	}
-	var buf bytes.Buffer
-	cfg := printer.Config{Mode: printer.UseSpaces | printer.TabIndent, Tabwidth: 8}
-	err = cfg.Fprint(&buf, fset, f)
-	if err != nil {
-		log.Fatalf("Failed to print AST: %v", err)
-		return nil, err
-	}
-	return buf.Bytes(), nil
+	printStmtStr := `fmt.Println("hello world")` + "\n"
+	return doInsert(printStmtStr, fset, f, positionsToInsert)
 }
 
-func extraStmt(statList []ast.Stmt, fset *token.FileSet) []ast.Stmt {
+func doInsert(printStmtStr string, fset *token.FileSet, f *ast.File, positionsToInsert []int) ([]byte, error) {
+	// 创建需要插入的打印语句的AST节点
+	// printStmtStr := `fmt.Println("hello world")` + "\n"
+
+	// 将源代码转为字符串
+	var src bytes.Buffer
+	if err := printer.Fprint(&src, fset, f); err != nil {
+		return nil, err
+	}
+	srcStr := src.String()
+	slices.Sort(positionsToInsert)
+	// 对于每个插入位置，将打印语句插入到源代码字符串中
+	var buf bytes.Buffer
+	buf.Grow(len(srcStr) + len(printStmtStr)*len(positionsToInsert))
+	posIdx := 0
+	lines := 0
+	i, j := 0, 0
+	for ; i < len(srcStr) && posIdx < len(positionsToInsert); i++ {
+		if lines == positionsToInsert[posIdx]-1 {
+			buf.WriteString(srcStr[j:i])
+			buf.WriteString(printStmtStr)
+			j = i
+			posIdx++
+		} else if srcStr[i] == '\n' {
+			lines++
+		}
+	}
+	buf.WriteString(srcStr[i:])
+	newFset, newF, err := getAstTree(buf.Bytes())
+	if err != nil {
+		return nil, err
+	}
+	return formatFile(newFset, newF)
+}
+
+func extraStmt(statList []ast.Stmt, fset *token.FileSet, positionsToInsert *[]int) {
 	// 遍历函数体中的语句
-	newStatList := make([]ast.Stmt, 0, len(statList))
 	for _, stmt := range statList {
 		//可以根据语句类型进一步处理
 		switch s := stmt.(type) {
 		case *ast.AssignStmt:
-			newStatList = append(newStatList, createStatementNode())
-			s.Rhs = extraExpr(s.Rhs, fset)
+			*positionsToInsert = append(*positionsToInsert, fset.Position(stmt.Pos()).Line)
+			extraExpr(s.Rhs, fset, positionsToInsert)
 		case *ast.IfStmt:
-			s.Body.List = extraStmt(s.Body.List, fset)
+			extraStmt(s.Body.List, fset, positionsToInsert)
 			if s.Else != nil {
 				switch s.Else.(type) {
 				case *ast.IfStmt:
-					s.Else = extraStmt([]ast.Stmt{s.Else.(*ast.IfStmt)}, fset)[0]
+					extraStmt([]ast.Stmt{s.Else.(*ast.IfStmt)}, fset, positionsToInsert)
 				case *ast.BlockStmt:
 					block := s.Else.(*ast.BlockStmt)
-					block.List = extraStmt(block.List, fset)
+					extraStmt(block.List, fset, positionsToInsert)
 					s.Else = block
 				}
 			}
 		case *ast.ForStmt:
-			newStatList = append(newStatList, createStatementNode())
-			s.Body.List = extraStmt(s.Body.List, fset)
+			*positionsToInsert = append(*positionsToInsert, fset.Position(stmt.Pos()).Line)
+			extraStmt(s.Body.List, fset, positionsToInsert)
 		case *ast.RangeStmt:
-			newStatList = append(newStatList, createStatementNode())
-			s.Body.List = extraStmt(s.Body.List, fset)
+			*positionsToInsert = append(*positionsToInsert, fset.Position(stmt.Pos()).Line)
+			extraStmt(s.Body.List, fset, positionsToInsert)
 		case *ast.SwitchStmt:
-			newStatList = append(newStatList, createStatementNode())
-			s.Body.List = extraStmt(s.Body.List, fset)
+			*positionsToInsert = append(*positionsToInsert, fset.Position(stmt.Pos()).Line)
+			extraStmt(s.Body.List, fset, positionsToInsert)
+		case *ast.SelectStmt:
+			*positionsToInsert = append(*positionsToInsert, fset.Position(stmt.Pos()).Line)
+			extraStmt(s.Body.List, fset, positionsToInsert)
+		case *ast.TypeSwitchStmt:
+			*positionsToInsert = append(*positionsToInsert, fset.Position(stmt.Pos()).Line)
+			extraStmt(s.Body.List, fset, positionsToInsert)
 		case *ast.CommClause:
-			s.Body = extraStmt(s.Body, fset)
+			extraStmt(s.Body, fset, positionsToInsert)
 		case *ast.CaseClause:
-			s.Body = extraStmt(s.Body, fset)
+			extraStmt(s.Body, fset, positionsToInsert)
 		case *ast.BlockStmt:
-			newStatList = append(newStatList, createStatementNode())
-			s.List = extraStmt(s.List, fset)
+			*positionsToInsert = append(*positionsToInsert, fset.Position(stmt.Pos()).Line)
+			extraStmt(s.List, fset, positionsToInsert)
+
 		case *ast.ReturnStmt:
-			newStatList = append(newStatList, createStatementNode())
-			for i, result := range s.Results {
-				s.Results[i] = extraExpr([]ast.Expr{result}, fset)[0]
+			*positionsToInsert = append(*positionsToInsert, fset.Position(stmt.Pos()).Line)
+			for _, result := range s.Results {
+				extraExpr([]ast.Expr{result}, fset, positionsToInsert)
 			}
 		case *ast.DeferStmt:
-			newStatList = append(newStatList, createStatementNode())
+			*positionsToInsert = append(*positionsToInsert, fset.Position(stmt.Pos()).Line)
 			if s.Call != nil && s.Call.Fun != nil {
-				s.Call.Fun = extraExpr([]ast.Expr{s.Call.Fun}, fset)[0]
+				extraExpr([]ast.Expr{s.Call.Fun}, fset, positionsToInsert)
 			}
-		case *ast.SelectStmt:
-			newStatList = append(newStatList, createStatementNode())
-			s.Body.List = extraStmt(s.Body.List, fset)
+
 		case *ast.GoStmt:
-			newStatList = append(newStatList, createStatementNode())
+			*positionsToInsert = append(*positionsToInsert, fset.Position(stmt.Pos()).Line)
 			if s.Call != nil && s.Call.Fun != nil {
-				s.Call.Fun = extraExpr([]ast.Expr{s.Call.Fun}, fset)[0]
+				extraExpr([]ast.Expr{s.Call.Fun}, fset, positionsToInsert)
 			}
-		case *ast.TypeSwitchStmt:
-			newStatList = append(newStatList, createStatementNode())
-			s.Body.List = extraStmt(s.Body.List, fset)
 		case *ast.ExprStmt:
 			switch s.X.(type) {
 			case *ast.CallExpr:
-				newStatList = append(newStatList, createStatementNode())
+				*positionsToInsert = append(*positionsToInsert, fset.Position(stmt.Pos()).Line)
 				expr := s.X.(*ast.CallExpr)
 				if expr.Fun != nil {
-					expr.Fun = extraExpr([]ast.Expr{expr.Fun}, fset)[0]
+					extraExpr([]ast.Expr{expr.Fun}, fset, positionsToInsert)
 				}
 			default:
-				newStatList = append(newStatList, createStatementNode())
+				*positionsToInsert = append(*positionsToInsert, fset.Position(stmt.Pos()).Line)
 			}
 		default:
-			newStatList = append(newStatList, createStatementNode())
+			*positionsToInsert = append(*positionsToInsert, fset.Position(stmt.Pos()).Line)
 		}
-		newStatList = append(newStatList, stmt)
 	}
-	return newStatList
 }
 
-func extraExpr(exprList []ast.Expr, fset *token.FileSet) []ast.Expr {
-	newExprList := make([]ast.Expr, 0, len(exprList))
+func extraExpr(exprList []ast.Expr, fset *token.FileSet, positionsToInsert *[]int) {
 	for _, expr := range exprList {
 		switch expr := expr.(type) {
 		case *ast.FuncLit:
-			expr.Body.List = extraStmt(expr.Body.List, fset)
+			extraStmt(expr.Body.List, fset, positionsToInsert)
 		}
-		newExprList = append(newExprList, expr)
-	}
-	return newExprList
-}
-
-func createStatementNode() ast.Stmt {
-	return &ast.ExprStmt{
-		X: &ast.CallExpr{
-			Fun: &ast.SelectorExpr{
-				X:   ast.NewIdent("fmt"),
-				Sel: ast.NewIdent("Println"),
-			},
-			Args: []ast.Expr{
-				&ast.BasicLit{
-					Kind:  token.STRING,
-					Value: `"hello world"`,
-				},
-			},
-		},
 	}
 }
 
-func runInsertComment(filename string, content []byte) ([]byte, error) {
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, filename, content, parser.ParseComments)
+func runInsertComment(content []byte) ([]byte, error) {
+	fset, f, err := getAstTree(content)
 	if err != nil {
-		log.Fatal(err)
-	}
-	fmt.Println(f.Name.Name)
-	for _, decl := range f.Decls {
-		if decl, ok := decl.(*ast.FuncDecl); ok {
-			insertComment(f, decl.Pos()-1)
-			decl.Body.List = extraStmtAndInsertComment(f, decl.Body.List, fset)
-		}
-	}
-	var buf bytes.Buffer
-	cfg := printer.Config{Mode: printer.UseSpaces | printer.TabIndent, Tabwidth: 8}
-	err = cfg.Fprint(&buf, fset, f)
-	if err != nil {
-		log.Fatalf("Failed to print AST: %v", err)
 		return nil, err
 	}
-	return buf.Bytes(), nil
+	positionsToInsert := []int{}
+	for _, decl := range f.Decls {
+		if decl, ok := decl.(*ast.FuncDecl); ok {
+			positionsToInsert = append(positionsToInsert, fset.Position(decl.Pos()).Line)
+			extraStmtAndInsertComment(f, decl.Body.List, fset, &positionsToInsert)
+		}
+	}
+	printStmtStr := `// + insert comment` + "\n"
+	return doInsert(printStmtStr, fset, f, positionsToInsert)
 }
 
-func extraStmtAndInsertComment(f *ast.File, statList []ast.Stmt, fset *token.FileSet) []ast.Stmt {
+func extraStmtAndInsertComment(f *ast.File, statList []ast.Stmt, fset *token.FileSet, positionsToInsert *[]int) {
 	// 遍历函数体中的语句
-	newStatList := make([]ast.Stmt, 0, len(statList))
 	for _, stmt := range statList {
 		if _, ok := stmt.(*ast.IfStmt); !ok {
-			insertComment(f, stmt.Pos()-1)
+			*positionsToInsert = append(*positionsToInsert, fset.Position(stmt.Pos()-1).Line)
 		}
-		// insertComment(f, stmt.Pos()-1)
 		//可以根据语句类型进一步处理
 		switch s := stmt.(type) {
 		case *ast.AssignStmt:
-			s.Rhs = extraExprAndInsertComment(f, s.Rhs, fset)
+			extraExprAndInsertComment(f, s.Rhs, fset, positionsToInsert)
 		case *ast.IfStmt:
-			insertComment(f, s.Body.Lbrace)
-			s.Body.List = extraStmtAndInsertComment(f, s.Body.List, fset)
+			*positionsToInsert = append(*positionsToInsert, fset.Position(s.Body.Lbrace).Line)
+			extraStmtAndInsertComment(f, s.Body.List, fset, positionsToInsert)
 			if s.Else != nil {
 				switch s.Else.(type) {
 				case *ast.IfStmt:
-					s.Else = extraStmtAndInsertComment(f, []ast.Stmt{s.Else.(*ast.IfStmt)}, fset)[0]
+					extraStmtAndInsertComment(f, []ast.Stmt{s.Else.(*ast.IfStmt)}, fset, positionsToInsert)
 				case *ast.BlockStmt:
-					insertComment(f, s.Else.Pos())
+					*positionsToInsert = append(*positionsToInsert, fset.Position(s.Else.Pos()).Line)
 					block := s.Else.(*ast.BlockStmt)
-					block.List = extraStmtAndInsertComment(f, block.List, fset)
-
-					s.Else = block
+					extraStmtAndInsertComment(f, block.List, fset, positionsToInsert)
 				}
 			}
 		case *ast.ForStmt:
-			s.Body.List = extraStmtAndInsertComment(f, s.Body.List, fset)
+			extraStmtAndInsertComment(f, s.Body.List, fset, positionsToInsert)
 		case *ast.RangeStmt:
-			s.Body.List = extraStmtAndInsertComment(f, s.Body.List, fset)
+			extraStmtAndInsertComment(f, s.Body.List, fset, positionsToInsert)
 		case *ast.SwitchStmt:
-			s.Body.List = extraStmtAndInsertComment(f, s.Body.List, fset)
+			extraStmtAndInsertComment(f, s.Body.List, fset, positionsToInsert)
+		case *ast.SelectStmt:
+			extraStmtAndInsertComment(f, s.Body.List, fset, positionsToInsert)
+		case *ast.TypeSwitchStmt:
+			extraStmtAndInsertComment(f, s.Body.List, fset, positionsToInsert)
 		case *ast.CommClause:
-			s.Body = extraStmtAndInsertComment(f, s.Body, fset)
+			extraStmtAndInsertComment(f, s.Body, fset, positionsToInsert)
 		case *ast.CaseClause:
-			s.Body = extraStmtAndInsertComment(f, s.Body, fset)
+			extraStmtAndInsertComment(f, s.Body, fset, positionsToInsert)
 		case *ast.BlockStmt:
-			s.List = extraStmtAndInsertComment(f, s.List, fset)
+			extraStmtAndInsertComment(f, s.List, fset, positionsToInsert)
 		case *ast.ReturnStmt:
-			for i, result := range s.Results {
-				s.Results[i] = extraExprAndInsertComment(f, []ast.Expr{result}, fset)[0]
+			for _, result := range s.Results {
+				extraExprAndInsertComment(f, []ast.Expr{result}, fset, positionsToInsert)
 			}
 		case *ast.DeferStmt:
 			if s.Call != nil && s.Call.Fun != nil {
-				s.Call.Fun = extraExprAndInsertComment(f, []ast.Expr{s.Call.Fun}, fset)[0]
+				extraExprAndInsertComment(f, []ast.Expr{s.Call.Fun}, fset, positionsToInsert)
 			}
-		case *ast.SelectStmt:
-			s.Body.List = extraStmtAndInsertComment(f, s.Body.List, fset)
+
 		case *ast.GoStmt:
 			if s.Call != nil && s.Call.Fun != nil {
-				s.Call.Fun = extraExprAndInsertComment(f, []ast.Expr{s.Call.Fun}, fset)[0]
+				extraExprAndInsertComment(f, []ast.Expr{s.Call.Fun}, fset, positionsToInsert)
 			}
-		case *ast.TypeSwitchStmt:
-			s.Body.List = extraStmtAndInsertComment(f, s.Body.List, fset)
+
 		case *ast.ExprStmt:
 			switch s.X.(type) {
 			case *ast.CallExpr:
 				expr := s.X.(*ast.CallExpr)
 				if expr.Fun != nil {
-					expr.Fun = extraExprAndInsertComment(f, []ast.Expr{expr.Fun}, fset)[0]
+					extraExprAndInsertComment(f, []ast.Expr{expr.Fun}, fset, positionsToInsert)
 				}
 			}
 		}
-		newStatList = append(newStatList, stmt)
 	}
-	return newStatList
 }
 
-func extraExprAndInsertComment(f *ast.File, exprList []ast.Expr, fset *token.FileSet) []ast.Expr {
-	newExprList := make([]ast.Expr, 0, len(exprList))
+func extraExprAndInsertComment(f *ast.File, exprList []ast.Expr, fset *token.FileSet, positionsToInsert *[]int) {
 	for _, expr := range exprList {
 		switch expr := expr.(type) {
 		case *ast.FuncLit:
-			expr.Body.List = extraStmtAndInsertComment(f, expr.Body.List, fset)
+			extraStmtAndInsertComment(f, expr.Body.List, fset, positionsToInsert)
 		}
-		newExprList = append(newExprList, expr)
 	}
-	return newExprList
-}
-
-func insertComment(f *ast.File, pos token.Pos) {
-	f.Comments = append(f.Comments, &ast.CommentGroup{
-		List: []*ast.Comment{
-			{
-				Slash: pos,
-				Text:  "// + insert comment test",
-			},
-		},
-	})
 }
