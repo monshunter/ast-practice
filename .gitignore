@@ -57,3 +57,5 @@ ehthumbs.db
 bin/*
 cmd/getcomments/getcomments
 cmd/blockfycodes/blockfycodes
+cmd/findmain/findmain
+cmd/topomain/topomain
