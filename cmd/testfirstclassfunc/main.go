@@ -76,3 +76,79 @@ func (r *RegistryController) run(stop <-chan struct{}) {
 		return true, nil
 	}, stop)
 }
+
+func switchCase1(a int) {
+	switch a {
+	case 1:
+		fmt.Println("a is 1")
+	case 2:
+		fmt.Println("a is 2")
+	default:
+		fmt.Println("a is not 1 or 2")
+	}
+}
+
+func switchCase2(a int) {
+	switch a {
+	case 1:
+		fmt.Println("a is 1")
+		fallthrough
+	case 2:
+		fmt.Println("a is 2")
+		fallthrough
+	case 3:
+		fmt.Println("a is 3")
+	default:
+		fmt.Println("a is not 1 or 2")
+	}
+}
+
+func typeswitch(a interface{}) {
+	switch a.(type) {
+	case int:
+		fmt.Println("a is int")
+	case string:
+		fmt.Println("a is string")
+		fmt.Println(a)
+	default:
+		fmt.Println("a is not int or string")
+	}
+}
+
+func selectCase() {
+	select {
+	case <-stop:
+		fmt.Println("stop")
+	case <-time.After(time.Second):
+		fmt.Println("timeout")
+	}
+}
+
+func selectCase2() {
+	fmt.Println("selectCase2")
+	stop = make(chan struct{})
+
+	select {
+	case <-stop:
+		fmt.Println("stop")
+	case <-time.After(time.Second):
+		fmt.Println("timeout")
+	}
+}
+
+func selectCase3() {
+	fmt.Println("selectCase3")
+	select {}
+}
+
+func selectCase4() {
+	fmt.Println("selectCase4")
+	stop = make(chan struct{})
+	select {
+	case <-stop:
+		fmt.Println("stop")
+	default:
+		fmt.Println("default")
+		fmt.Println("default")
+	}
+}

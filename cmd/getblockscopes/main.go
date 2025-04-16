@@ -53,15 +53,15 @@ func (b *BlockScope) IsEmpty() bool {
 }
 
 func (b *BlockScope) IsValid() bool {
-	return b.StartLine <= b.EndLine
+	return b.StartLine < b.EndLine
 }
 
 func (b *BlockScope) Contains(line int) bool {
-	return line >= b.StartLine && line <= b.EndLine
+	return line > b.StartLine && line < b.EndLine
 }
 
 func (b *BlockScope) ContainsRange(start, end int) bool {
-	return start >= b.StartLine && end <= b.EndLine
+	return start > b.StartLine && end < b.EndLine
 }
 
 type BlockScopes []BlockScope
@@ -137,16 +137,16 @@ func BlockScopesOfGoAST(filename string, content []byte) (BlockScopes, error) {
 					case *ast.CaseClause:
 						if stmt.Body != nil {
 							blockScopes = append(blockScopes, BlockScope{
-								StartLine: fset.Position(stmt.Body[0].Pos()).Line,
-								EndLine:   fset.Position(stmt.Body[len(stmt.Body)-1].End()).Line,
+								StartLine: fset.Position(stmt.Body[0].Pos()).Line - 1,
+								EndLine:   fset.Position(stmt.Body[len(stmt.Body)-1].End()).Line + 1,
 							})
 						}
 
 					case *ast.CommClause:
 						if stmt.Body != nil {
 							blockScopes = append(blockScopes, BlockScope{
-								StartLine: fset.Position(stmt.Body[0].Pos()).Line,
-								EndLine:   fset.Position(stmt.Body[len(stmt.Body)-1].End()).Line,
+								StartLine: fset.Position(stmt.Body[0].Pos()).Line - 1,
+								EndLine:   fset.Position(stmt.Body[len(stmt.Body)-1].End()).Line + 1,
 							})
 						}
 					case *ast.FuncLit:
